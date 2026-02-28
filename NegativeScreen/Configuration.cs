@@ -29,10 +29,29 @@ namespace NegativeScreen
 {
 	class Configuration : IConfigurable
 	{
-		public string WorkingDirectoryConfigurationFileName { get; } =
-			Path.Combine(Environment.CurrentDirectory, "negativescreen.conf");
-		public string AppDataConfigurationFileName { get; } =
-			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NegativeScreen/negativescreen.conf");
+		private string _workingDirectoryConfigurationFileName;
+		private string _appDataConfigurationFileName;
+
+		public string WorkingDirectoryConfigurationFileName
+		{
+			get
+			{
+				if (_workingDirectoryConfigurationFileName == null)
+					_workingDirectoryConfigurationFileName = Path.Combine(Environment.CurrentDirectory, "negativescreen.conf");
+				return _workingDirectoryConfigurationFileName;
+			}
+		}
+
+		public string AppDataConfigurationFileName
+		{
+			get
+			{
+				if (_appDataConfigurationFileName == null)
+					_appDataConfigurationFileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NegativeScreen/negativescreen.conf");
+				return _appDataConfigurationFileName;
+			}
+		}
+
 		public ConfigurationLocation Source { get; private set; }
 
 		#region Default configuration
@@ -346,16 +365,11 @@ Binary (Black and white)=
 
 		public static void UserEditCurrentConfiguration()
 		{
-			void EditPath(string path)
-			{
-				Process.Start("notepad", path);
-			}
-
 			switch (Current.Source)
 			{
 				case ConfigurationLocation.AppData:
 					// If the source is AppData, use it:
-					EditPath(Current.AppDataConfigurationFileName);
+					Process.Start("notepad", Current.AppDataConfigurationFileName);
 					break;
 				case ConfigurationLocation.WorkingDirectory:
 				case ConfigurationLocation.Embedded:
@@ -375,13 +389,13 @@ Binary (Black and white)=
 							using (new FileStream(Current.WorkingDirectoryConfigurationFileName, FileMode.Open, FileAccess.ReadWrite)) { }
 						}
 						// Edit the working directory conf if we can
-						EditPath(Current.WorkingDirectoryConfigurationFileName);
+						Process.Start("notepad", Current.WorkingDirectoryConfigurationFileName);
 					}
 					catch (Exception)
 					{
 						// If we can't access the working directory conf, use the AppData one instead
 						Current.EnsureAppDataConfigurationFileExists();
-						EditPath(Current.AppDataConfigurationFileName);
+						Process.Start("notepad", Current.AppDataConfigurationFileName);
 					}
 					break;
 			}
@@ -451,7 +465,10 @@ Binary (Black and white)=
 	class HotKeyParser : ICustomParser
 	{
 
-		public Type ReturnType => typeof(HotKey);
+		public Type ReturnType
+		{
+			get { return typeof(HotKey); }
+		}
 
 		public object Parse(string rawValue, object customParameter)
 		{
@@ -491,7 +508,8 @@ Binary (Black and white)=
 						if (!Enum.TryParse(item, true, out key))
 						{
 							// try to parse numeric value
-							if (int.TryParse(item, out int numericValue))
+							int numericValue;
+							if (int.TryParse(item, out numericValue))
 							{
 								if (Enum.IsDefined(typeof(Keys), numericValue))
 								{
@@ -510,10 +528,15 @@ Binary (Black and white)=
 	class MatrixParser : ICustomParser
 	{
 
-		public Type ReturnType => typeof(float[,]);
+		public Type ReturnType
+		{
+			get { return typeof(float[,]); }
+		}
 
 		public object Parse(string rawValue, object customParameter)
-			=> StaticParseMatrix(rawValue);
+		{
+			return StaticParseMatrix(rawValue);
+		}
 
 		public static float[,] StaticParseMatrix(string rawValue)
 		{
@@ -534,10 +557,11 @@ Binary (Black and white)=
 				}
 				for (int y = 0; y < matrix.GetLength(1); y++)
 				{
+					float value;
 					if (!float.TryParse(columnSplit[y],
 						System.Globalization.NumberStyles.Float,
 						System.Globalization.NumberFormatInfo.InvariantInfo,
-						out float value))
+						out value))
 					{
 						throw new Exception(string.Format("Unable to parse \"{0}\" to a float.", columnSplit[y]));
 					}
@@ -584,7 +608,9 @@ Binary (Black and white)=
 		}
 
 		public override int GetHashCode()
-			=> (int)Key | (int)Modifiers << 16 | Id << 20;
+		{
+			return (int)Key | (int)Modifiers << 16 | Id << 20;
+		}
 
 		public override bool Equals(object obj)
 		{
@@ -603,10 +629,14 @@ Binary (Black and white)=
 		}
 
 		public static bool operator ==(HotKey a, HotKey b)
-			=> a.GetHashCode() == b.GetHashCode();
+		{
+			return a.GetHashCode() == b.GetHashCode();
+		}
 
 		public static bool operator !=(HotKey a, HotKey b)
-			=> a.GetHashCode() != b.GetHashCode();
+		{
+			return a.GetHashCode() != b.GetHashCode();
+		}
 
 		public override string ToString()
 		{
@@ -634,8 +664,8 @@ Binary (Black and white)=
 
 	struct ScreenColorEffect
 	{
-		public float[,] Matrix { get; }
-		public string Description { get; }
+		public float[,] Matrix { get; private set; }
+		public string Description { get; private set; }
 
 		public ScreenColorEffect(float[,] matrix, string description)
 			: this()

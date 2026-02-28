@@ -240,7 +240,8 @@ namespace NegativeScreen
 
 		public static bool IsX86InWow64Mode()
 		{
-			IsWow64Process(Process.GetCurrentProcess().Handle, out bool retVal);
+			bool retVal;
+			IsWow64Process(Process.GetCurrentProcess().Handle, out retVal);
 			return retVal;
 		}
 
@@ -269,7 +270,9 @@ namespace NegativeScreen
 		/// </summary>
 		/// <returns></returns>
 		public static Exception GetExceptionForLastError()
-			=> Marshal.GetExceptionForHR(HRESULT_FROM_WIN32((ulong)GetLastError()));
+		{
+			return Marshal.GetExceptionForHR(HRESULT_FROM_WIN32((ulong)GetLastError()));
+		}
 
 		#endregion
 

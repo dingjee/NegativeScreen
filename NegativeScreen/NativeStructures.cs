@@ -253,13 +253,19 @@ namespace NegativeScreen
 
 		// Attempting a minor degree of "hash-ness" here
 		public override int GetHashCode()
-			=> ((left ^ top) ^ right) ^ bottom;
+		{
+			return ((left ^ top) ^ right) ^ bottom;
+		}
 
 		public static bool operator ==(RECT a, RECT b)
-			=> (a.left == b.left && a.right == b.right && a.top == b.top && a.bottom == b.bottom);
+		{
+			return (a.left == b.left && a.right == b.right && a.top == b.top && a.bottom == b.bottom);
+		}
 
 		public static bool operator !=(RECT a, RECT b)
-			=> !(a == b);
+		{
+			return !(a == b);
+		}
 
 	}
 

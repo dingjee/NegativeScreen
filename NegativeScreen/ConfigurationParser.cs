@@ -71,7 +71,7 @@ namespace NegativeScreen
 	[AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
 	public sealed class MatchingKeyAttribute : Attribute
 	{
-		public string Key { get; }
+		public string Key { get; private set; }
 
 		public MatchingKeyAttribute(string key)
 		{
@@ -289,7 +289,8 @@ namespace NegativeScreen
 		private static int ParseInt(string rawValue, int? @default = null)
 		{
 			string trimmed = rawValue.Trim();
-			if (int.TryParse(trimmed, out int value))
+			int value;
+			if (int.TryParse(trimmed, out value))
 			{
 				return value;
 			}

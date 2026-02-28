@@ -2,17 +2,10 @@
 {
 	partial class OverlayManager
 	{
-		/// <summary>
-		/// Required designer variable.
-		/// </summary>
 		private System.ComponentModel.IContainer components = null;
 
 		#region Windows Form Designer generated code
 
-		/// <summary>
-		/// Required method for Designer support - do not modify
-		/// the contents of this method with the code editor.
-		/// </summary>
 		private void InitializeComponent()
 		{
             this.components = new System.ComponentModel.Container();
@@ -21,6 +14,7 @@
             this.trayIconContextMenuStrip = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.toggleInversionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.changeModeToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.selectMonitorsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.editConfigurationToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
@@ -42,6 +36,7 @@
             this.trayIconContextMenuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.toggleInversionToolStripMenuItem,
             this.changeModeToolStripMenuItem,
+            this.selectMonitorsToolStripMenuItem,
             this.toolStripSeparator1,
             this.editConfigurationToolStripMenuItem,
             this.toolStripSeparator2,
@@ -49,7 +44,7 @@
             this.toolStripSeparator3,
             this.exitToolStripMenuItem});
             this.trayIconContextMenuStrip.Name = "trayIconContextMenuStrip";
-            this.trayIconContextMenuStrip.Size = new System.Drawing.Size(172, 154);
+            this.trayIconContextMenuStrip.Size = new System.Drawing.Size(172, 176);
             // 
             // toggleInversionToolStripMenuItem
             // 
@@ -63,6 +58,12 @@
             this.changeModeToolStripMenuItem.Name = "changeModeToolStripMenuItem";
             this.changeModeToolStripMenuItem.Size = new System.Drawing.Size(171, 22);
             this.changeModeToolStripMenuItem.Text = "Change Mode";
+            // 
+            // selectMonitorsToolStripMenuItem
+            // 
+            this.selectMonitorsToolStripMenuItem.Name = "selectMonitorsToolStripMenuItem";
+            this.selectMonitorsToolStripMenuItem.Size = new System.Drawing.Size(171, 22);
+            this.selectMonitorsToolStripMenuItem.Text = "Select Monitors";
             // 
             // toolStripSeparator1
             // 
@@ -120,6 +121,7 @@
 		private System.Windows.Forms.ToolStripMenuItem exitToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem toggleInversionToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem changeModeToolStripMenuItem;
+		private System.Windows.Forms.ToolStripMenuItem selectMonitorsToolStripMenuItem;
 		private System.Windows.Forms.ToolStripSeparator toolStripSeparator1;
 		private System.Windows.Forms.ToolStripMenuItem editConfigurationToolStripMenuItem;
 		private System.Windows.Forms.ToolStripSeparator toolStripSeparator2;

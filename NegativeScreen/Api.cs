@@ -105,7 +105,7 @@ namespace NegativeScreen
 					}
 					else
 					{
-						WriteResponse(context.Response, $"NegativeScreen {Application.ProductVersion}.");
+						WriteResponse(context.Response, string.Format("NegativeScreen {0}.", Application.ProductVersion));
 					}
 					context.Response.Close();
 					previousErrorCount = 0; // Reset the error count upon successful request.
@@ -129,7 +129,7 @@ namespace NegativeScreen
 		{
 			response.KeepAlive = false;
 			response.SendChunked = false;
-			var buffer = Encoding.UTF8.GetBytes($"{body}\r\n");
+			var buffer = Encoding.UTF8.GetBytes(string.Format("{0}\r\n", body));
 			response.ContentLength64 = buffer.Length;
 			response.OutputStream.Write(buffer, 0, buffer.Length);
 			response.OutputStream.Close();

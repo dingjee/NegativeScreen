@@ -360,6 +360,7 @@ namespace NegativeScreen
                     {
                         ToggleColorEffect(fromNormal: false);
                     }
+                    NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
                 }
                 catch (CannotChangeColorEffectException)
                 {

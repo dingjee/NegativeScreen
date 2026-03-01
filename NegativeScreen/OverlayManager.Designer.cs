@@ -1,4 +1,4 @@
-﻿namespace NegativeScreen
+﻿﻿namespace NegativeScreen
 {
 	partial class OverlayManager
 	{

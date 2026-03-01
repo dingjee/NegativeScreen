@@ -72,6 +72,10 @@ namespace NegativeScreen
 		[DllImport("user32.dll", SetLastError = true)]
 		public static extern bool PostThreadMessage(uint threadId, uint msg, IntPtr wParam, IntPtr lParam);
 
+		[return: MarshalAs(UnmanagedType.Bool)]
+		[DllImport("user32.dll", SetLastError = true)]
+		public static extern bool DestroyWindow(IntPtr hWnd);
+
 		/// <summary>
 		/// http://msdn.microsoft.com/en-us/library/ms633591%28v=vs.85%29.aspx
 		/// </summary>

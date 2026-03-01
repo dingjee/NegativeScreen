@@ -416,7 +416,7 @@ Binary (Black and white)=
 		[MatchingKey("MainLoopRefreshTime", CustomParameter = 100)]
 		public int MainLoopRefreshTime { get; protected set; }
 
-		[MatchingKey("ActiveOnStartup", CustomParameter = true)]
+		[MatchingKey("ActiveOnStartup", CustomParameter = false)]
 		public bool ActiveOnStartup { get; protected set; }
 
 		[MatchingKey("ShowAeroWarning", CustomParameter = true)]

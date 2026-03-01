@@ -193,20 +193,48 @@ namespace NegativeScreen
 
         public void Enable()
         {
-            if (!_isCreated)
+            if (!_isCreated || _hwnd == IntPtr.Zero)
+            {
                 Create();
+            }
+
+            var transform = new Transformation();
+            transform.m00 = 1.0f;
+            transform.m01 = 0.0f;
+            transform.m02 = 0.0f;
+            transform.m10 = 0.0f;
+            transform.m11 = 1.0f;
+            transform.m12 = 0.0f;
+            transform.m20 = 0.0f;
+            transform.m21 = 0.0f;
+            transform.m22 = 1.0f;
+            NativeMethods.MagSetWindowTransform(_hwnd, ref transform);
 
             _isEnabled = true;
+            SetColorEffect(_baseColorMatrix);
+
             NativeMethods.SetWindowPos(_hwnd, new IntPtr(HWND_TOPMOST),
                 _monitor.Bounds.X, _monitor.Bounds.Y,
                 _monitor.Bounds.Width, _monitor.Bounds.Height,
                 SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            var sourceRect = new RECT(_monitor.Bounds.X, _monitor.Bounds.Y,
+                _monitor.Bounds.X + _monitor.Bounds.Width,
+                _monitor.Bounds.Y + _monitor.Bounds.Height);
+            NativeMethods.MagSetWindowSource(_hwnd, sourceRect);
         }
 
         public void Disable()
         {
             _isEnabled = false;
-            SetColorEffect(BuiltinMatrices.Identity);
+            if (_hwnd != IntPtr.Zero)
+            {
+                SetColorEffect(BuiltinMatrices.Identity);
+                var emptyRect = new RECT(0, 0, 0, 0);
+                NativeMethods.MagSetWindowSource(_hwnd, emptyRect);
+                NativeMethods.DestroyWindow(_hwnd);
+                _hwnd = IntPtr.Zero;
+                _isCreated = false;
+            }
         }
 
         public void Show()

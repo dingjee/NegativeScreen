@@ -32,6 +32,8 @@ namespace NegativeScreen
         private AboutBox aboutForm = new AboutBox();
 
         private bool mainLoopPaused = false;
+        private bool magInitialized = false;
+        private object magInitLock = new object();
         private bool exiting = false;
         private float[,] currentMatrix = null;
 
@@ -101,6 +103,12 @@ namespace NegativeScreen
 
             toggleInversionToolStripMenuItem.ShortcutKeyDisplayString = Configuration.Current.ToggleKey.ToString();
             exitToolStripMenuItem.ShortcutKeyDisplayString = Configuration.Current.ExitKey.ToString();
+
+            if (!Configuration.Current.ActiveOnStartup)
+            {
+                mainLoopPaused = true;
+            }
+
             InitializeContextMenu();
 
             currentMatrix = Configuration.Current.InitialColorEffect.Matrix;
@@ -189,13 +197,18 @@ namespace NegativeScreen
         {
             selectMonitorsToolStripMenuItem.DropDownItems.Clear();
 
+            bool isActive = !mainLoopPaused;
             var allMonitorsItem = new ToolStripMenuItem("All Monitors")
             {
                 Tag = "all",
-                Checked = !usePerMonitorMode
+                Checked = isActive && !usePerMonitorMode
             };
             allMonitorsItem.Click += (s, e) =>
             {
+                if (mainLoopPaused)
+                {
+                    mainLoopPaused = false;
+                }
                 usePerMonitorMode = false;
                 enabledMonitors.Clear();
                 UpdateMonitorMenuChecks();
@@ -211,10 +224,14 @@ namespace NegativeScreen
                 var monitorItem = new ToolStripMenuItem(monitor.ToString())
                 {
                     Tag = id,
-                    Checked = enabledMonitors.Contains(id) || !usePerMonitorMode
+                    Checked = isActive && (enabledMonitors.Contains(id) || !usePerMonitorMode)
                 };
                 monitorItem.Click += (s, e) =>
                 {
+                    if (mainLoopPaused)
+                    {
+                        mainLoopPaused = false;
+                    }
                     usePerMonitorMode = true;
                     var item = (ToolStripMenuItem)s;
                     string monitorId = (string)item.Tag;
@@ -247,18 +264,23 @@ namespace NegativeScreen
 
         private void UpdateMonitorMenuChecks()
         {
-            foreach (ToolStripMenuItem item in selectMonitorsToolStripMenuItem.DropDownItems)
+            bool isActive = !mainLoopPaused;
+            foreach (var item in selectMonitorsToolStripMenuItem.DropDownItems)
             {
-                string tag = item.Tag as string;
-                if (tag != null)
+                ToolStripMenuItem menuItem = item as ToolStripMenuItem;
+                if (menuItem != null)
                 {
-                    if (tag == "all")
+                    string tag = menuItem.Tag as string;
+                    if (tag != null)
                     {
-                        item.Checked = !usePerMonitorMode;
-                    }
-                    else
-                    {
-                        item.Checked = enabledMonitors.Contains(tag) || !usePerMonitorMode;
+                        if (tag == "all")
+                        {
+                            menuItem.Checked = isActive && !usePerMonitorMode;
+                        }
+                        else
+                        {
+                            menuItem.Checked = isActive && (enabledMonitors.Contains(tag) || !usePerMonitorMode);
+                        }
                     }
                 }
             }
@@ -286,17 +308,23 @@ namespace NegativeScreen
 
         private void ControlLoop()
         {
-            if (!Configuration.Current.ActiveOnStartup)
-            {
-                mainLoopPaused = true;
-                PauseLoop();
-            }
-
             while (!exiting)
             {
-                if (!NativeMethods.MagInitialize())
+                while (mainLoopPaused && !exiting)
                 {
-                    throw new Exception("MagInitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+                    System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
+                    DoMagnifierApiInvoke();
+                }
+
+                if (exiting) break;
+
+                lock (magInitLock)
+                {
+                    if (!NativeMethods.MagInitialize())
+                    {
+                        throw new Exception("MagInitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+                    }
+                    magInitialized = true;
                 }
 
                 try
@@ -315,35 +343,35 @@ namespace NegativeScreen
                     mainLoopPaused = true;
                 }
 
-                while (!exiting)
+                while (!exiting && !mainLoopPaused)
                 {
                     System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
                     DoMagnifierApiInvoke();
                     RefreshMagnifierWindows();
+                }
 
-                    if (mainLoopPaused)
+                try
+                {
+                    if (usePerMonitorMode)
                     {
-                        try
-                        {
-                            if (usePerMonitorMode)
-                            {
-                                DisableAllMagnifierWindows();
-                            }
-                            else
-                            {
-                                ToggleColorEffect(fromNormal: false);
-                            }
-                        }
-                        catch (CannotChangeColorEffectException)
-                        {
-                        }
-                        if (!NativeMethods.MagUninitialize())
-                        {
-                            throw new Exception("MagUninitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-                        }
-                        PauseLoop();
-                        break;
+                        DisableAllMagnifierWindows();
                     }
+                    else
+                    {
+                        ToggleColorEffect(fromNormal: false);
+                    }
+                }
+                catch (CannotChangeColorEffectException)
+                {
+                }
+
+                lock (magInitLock)
+                {
+                    if (!NativeMethods.MagUninitialize())
+                    {
+                        throw new Exception("MagUninitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+                    }
+                    magInitialized = false;
                 }
             }
             this.Invoke((Action)(() =>
@@ -406,28 +434,39 @@ namespace NegativeScreen
 
         private void EnableMagnifierWindow(string monitorId)
         {
+            int waitCount = 0;
+            while (!magInitialized && waitCount < 100)
+            {
+                System.Threading.Thread.Sleep(50);
+                waitCount++;
+            }
+            if (!magInitialized)
+            {
+                return;
+            }
+
             var monitor = MonitorManager.Monitors.FirstOrDefault(m => m.UniqueId == monitorId);
             if (monitor != null)
             {
-                if (!magnifierWindows.ContainsKey(monitorId))
+                MagnifierWindow window;
+                if (!magnifierWindows.TryGetValue(monitorId, out window))
                 {
-                    var window = new MagnifierWindow(monitor);
-                    window.Create();
+                    window = new MagnifierWindow(monitor);
                     magnifierWindows[monitorId] = window;
                 }
 
                 MonitorSettings settings;
                 if (monitorSettings.TryGetValue(monitorId, out settings))
                 {
-                    magnifierWindows[monitorId].SetColorEffect(settings.ColorEffect);
-                    magnifierWindows[monitorId].SetBrightnessContrast(settings.Brightness, settings.Contrast);
+                    window.SetColorEffect(settings.ColorEffect);
+                    window.SetBrightnessContrast(settings.Brightness, settings.Contrast);
                 }
                 else
                 {
-                    magnifierWindows[monitorId].SetColorEffect(currentMatrix);
-                    magnifierWindows[monitorId].SetBrightnessContrast(globalBrightness, globalContrast);
+                    window.SetColorEffect(currentMatrix);
+                    window.SetBrightnessContrast(globalBrightness, globalContrast);
                 }
-                magnifierWindows[monitorId].Enable();
+                window.Enable();
             }
         }
 
@@ -588,6 +627,8 @@ namespace NegativeScreen
 
         private void ToggleColorEffect(bool fromNormal)
         {
+            NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
+
             if (fromNormal)
             {
                 float[,] finalMatrix = BuiltinMatrices.ApplyBrightnessContrast(currentMatrix, globalBrightness, globalContrast);

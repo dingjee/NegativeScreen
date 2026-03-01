@@ -158,6 +158,17 @@ namespace NegativeScreen
 						}
 					}
 					// TODO: default parser for other simple types (int, float...)
+					else if (matchingProp.PropertyType == typeof(float))
+					{
+						if (matchingAttribute.CustomParameter is float)
+						{
+							matchingProp.SetValue(configuration, ParseFloat(item.Value, (float)matchingAttribute.CustomParameter), null);
+						}
+						else
+						{
+							matchingProp.SetValue(configuration, ParseFloat(item.Value), null);
+						}
+					}
 					else
 					{
 						throw new Exception(string.Format("Could not find a parser for type \"{0}\"!", matchingProp.PropertyType));
@@ -303,6 +314,27 @@ namespace NegativeScreen
 				else
 				{
 					throw new Exception("Could not parse an integer value!");
+				}
+			}
+		}
+
+		private static float ParseFloat(string rawValue, float? @default = null)
+		{
+			string trimmed = rawValue.Trim();
+			float value;
+			if (float.TryParse(trimmed, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value))
+			{
+				return value;
+			}
+			else
+			{
+				if (@default.HasValue)
+				{
+					return @default.Value;
+				}
+				else
+				{
+					throw new Exception("Could not parse a float value!");
 				}
 			}
 		}

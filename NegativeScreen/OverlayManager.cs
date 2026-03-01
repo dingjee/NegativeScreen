@@ -34,6 +34,7 @@ namespace NegativeScreen
         private bool mainLoopPaused = false;
         private bool magInitialized = false;
         private object magInitLock = new object();
+        private volatile bool brightnessContrastNeedsUpdate = false;
         private bool exiting = false;
         private float[,] currentMatrix = null;
 
@@ -56,7 +57,6 @@ namespace NegativeScreen
             lock (invokeColorEffectLock)
             {
                 invokeColorEffect = colorEffect;
-                SynchronizeMenuItemCheckboxesWithEffect(colorEffect);
                 shouldInvokeColorEffect = true;
             }
         }
@@ -112,7 +112,10 @@ namespace NegativeScreen
             InitializeContextMenu();
 
             currentMatrix = Configuration.Current.InitialColorEffect.Matrix;
-            SynchronizeMenuItemCheckboxesWithEffect(Configuration.Current.InitialColorEffect);
+
+            // Load saved brightness/contrast from conf
+            globalBrightness = Configuration.Current.SavedBrightness;
+            globalContrast = Configuration.Current.SavedContrast;
 
             InitializeMonitorSettings();
             InitializeControlLoop();
@@ -173,213 +176,263 @@ namespace NegativeScreen
             return true;
         }
 
+        // Monitor menu items inserted at this index in the context menu
+        private int monitorMenuInsertIndex = -1;
+        private int monitorMenuItemCount = 0;
+
+        // Inline brightness/contrast slider hosts
+        private TrackBar brightnessTrackBar;
+        private TrackBar contrastTrackBar;
+        private Label brightnessValueLabel;
+        private Label contrastValueLabel;
+
         private void InitializeContextMenu()
         {
-            foreach (var item in Configuration.Current.ColorEffects)
-            {
-                var menuItem = new ToolStripMenuItem(item.Value.Description)
-                {
-                    Tag = item.Value,
-                    ShortcutKeyDisplayString = item.Key.ToString()
-                };
-                menuItem.Click += (s, e) =>
-                {
-                    var effect = (ScreenColorEffect)((ToolStripMenuItem)s).Tag;
-                    InvokeColorEffect(effect);
-                };
-                this.changeModeToolStripMenuItem.DropDownItems.Add(menuItem);
-            }
+            trayIconContextMenuStrip.Items.Clear();
 
+            // Toggle Inversion
+            trayIconContextMenuStrip.Items.Add(toggleInversionToolStripMenuItem);
+
+            // Separator
+            trayIconContextMenuStrip.Items.Add(toolStripSeparator1);
+
+            // Monitor items will be inserted here
+            monitorMenuInsertIndex = trayIconContextMenuStrip.Items.Count;
             BuildMonitorMenu();
+
+            // Separator before sliders
+            trayIconContextMenuStrip.Items.Add(toolStripSeparator2);
+
+            // Brightness slider
+            BuildBrightnessSlider();
+
+            // Contrast slider
+            BuildContrastSlider();
+
+            // Separator
+            trayIconContextMenuStrip.Items.Add(toolStripSeparator3);
+
+            // Edit Configuration
+            trayIconContextMenuStrip.Items.Add(editConfigurationToolStripMenuItem);
+
+            // About
+            trayIconContextMenuStrip.Items.Add(aboutToolStripMenuItem);
+
+            // Separator + Exit
+            var sep4 = new ToolStripSeparator();
+            trayIconContextMenuStrip.Items.Add(sep4);
+            trayIconContextMenuStrip.Items.Add(exitToolStripMenuItem);
+
+            // Hide magnifier windows when context menu opens to fix positioning/scaling
+            trayIconContextMenuStrip.Opening += (s, e) =>
+            {
+                foreach (var window in magnifierWindows.Values)
+                {
+                    if (window.IsEnabled) window.Hide();
+                }
+            };
+            trayIconContextMenuStrip.Closed += (s, e) =>
+            {
+                foreach (var window in magnifierWindows.Values)
+                {
+                    if (window.IsEnabled) window.Show();
+                }
+            };
+        }
+
+        private void BuildBrightnessSlider()
+        {
+            // Label row
+            var brightnessLabelItem = new ToolStripMenuItem("Brightness")
+            {
+                Enabled = false
+            };
+            trayIconContextMenuStrip.Items.Add(brightnessLabelItem);
+
+            // Slider + value in a panel
+            var panel = new Panel { Width = 230, Height = 30 };
+            panel.Padding = new Padding(0);
+
+            // Slider direction: positive slider = brighter for user = negative internal value
+            brightnessTrackBar = new TrackBar
+            {
+                Minimum = -30,
+                Maximum = 30,
+                Value = (int)(-globalBrightness * 100),
+                TickFrequency = 5,
+                SmallChange = 5,
+                LargeChange = 5,
+                Location = new Point(0, 2),
+                Size = new Size(170, 26),
+                AutoSize = false
+            };
+            brightnessTrackBar.Scroll += (s, e) =>
+            {
+                globalBrightness = -brightnessTrackBar.Value / 100.0f;
+                brightnessValueLabel.Text = brightnessTrackBar.Value > 0
+                    ? "+" + (brightnessTrackBar.Value / 100.0f).ToString("F2")
+                    : (brightnessTrackBar.Value / 100.0f).ToString("F2");
+                ApplyCurrentEffectToAllMonitors();
+                Configuration.SaveValue("SavedBrightness", globalBrightness.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+            };
+
+            float displayVal = -globalBrightness;
+            brightnessValueLabel = new Label
+            {
+                Text = displayVal >= 0 ? "+" + displayVal.ToString("F2") : displayVal.ToString("F2"),
+                Location = new Point(172, 6),
+                Size = new Size(55, 18),
+                TextAlign = System.Drawing.ContentAlignment.MiddleRight
+            };
+
+            panel.Controls.Add(brightnessTrackBar);
+            panel.Controls.Add(brightnessValueLabel);
+
+            var host = new ToolStripControlHost(panel)
+            {
+                AutoSize = false,
+                Size = new Size(230, 30)
+            };
+            trayIconContextMenuStrip.Items.Add(host);
+        }
+
+        private void BuildContrastSlider()
+        {
+            var contrastLabelItem = new ToolStripMenuItem("Contrast")
+            {
+                Enabled = false
+            };
+            trayIconContextMenuStrip.Items.Add(contrastLabelItem);
+
+            var panel = new Panel { Width = 220, Height = 30 };
+            panel.Padding = new Padding(0);
+
+            contrastTrackBar = new TrackBar
+            {
+                Minimum = 5,
+                Maximum = 20,
+                Value = (int)(globalContrast * 10),
+                TickFrequency = 1,
+                SmallChange = 1,
+                LargeChange = 1,
+                Location = new Point(0, 2),
+                Size = new Size(170, 26),
+                AutoSize = false
+            };
+            contrastTrackBar.Scroll += (s, e) =>
+            {
+                globalContrast = contrastTrackBar.Value / 10.0f;
+                contrastValueLabel.Text = globalContrast.ToString("F1");
+                ApplyCurrentEffectToAllMonitors();
+                Configuration.SaveValue("SavedContrast", globalContrast.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+            };
+
+            contrastValueLabel = new Label
+            {
+                Text = globalContrast.ToString("F1"),
+                Location = new Point(172, 6),
+                Size = new Size(45, 18),
+                TextAlign = System.Drawing.ContentAlignment.MiddleRight
+            };
+
+            panel.Controls.Add(contrastTrackBar);
+            panel.Controls.Add(contrastValueLabel);
+
+            var host = new ToolStripControlHost(panel)
+            {
+                AutoSize = false,
+                Size = new Size(220, 30)
+            };
+            trayIconContextMenuStrip.Items.Add(host);
         }
 
         private void BuildMonitorMenu()
         {
-            selectMonitorsToolStripMenuItem.DropDownItems.Clear();
-
-            bool isActive = !mainLoopPaused;
-            var allMonitorsItem = new ToolStripMenuItem("All Monitors")
+            // Remove old monitor items
+            for (int i = 0; i < monitorMenuItemCount; i++)
             {
-                Tag = "all",
-                Checked = isActive && !usePerMonitorMode
-            };
-            allMonitorsItem.Click += (s, e) =>
-            {
-                if (mainLoopPaused)
-                {
-                    mainLoopPaused = false;
-                }
-                usePerMonitorMode = false;
-                enabledMonitors.Clear();
-                UpdateMonitorMenuChecks();
-                ApplyCurrentEffectToAllMonitors();
-            };
-            selectMonitorsToolStripMenuItem.DropDownItems.Add(allMonitorsItem);
+                trayIconContextMenuStrip.Items.RemoveAt(monitorMenuInsertIndex);
+            }
+            monitorMenuItemCount = 0;
 
-            selectMonitorsToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            MonitorManager.Refresh();
+            var monitors = MonitorManager.Monitors;
 
-            foreach (var monitor in MonitorManager.Monitors)
+            // Do NOT auto-select here. Toggle() handles default selection.
+
+            int insertAt = monitorMenuInsertIndex;
+            foreach (var monitor in monitors)
             {
                 string id = monitor.UniqueId;
+                bool isChecked = enabledMonitors.Contains(id);
                 var monitorItem = new ToolStripMenuItem(monitor.ToString())
                 {
                     Tag = id,
-                    Checked = isActive && (enabledMonitors.Contains(id) || !usePerMonitorMode)
+                    Checked = isChecked
                 };
-                monitorItem.Click += (s, e) =>
+                monitorItem.Click += MonitorMenuItem_Click;
+                trayIconContextMenuStrip.Items.Insert(insertAt, monitorItem);
+                insertAt++;
+                monitorMenuItemCount++;
+            }
+        }
+
+        private void MonitorMenuItem_Click(object sender, EventArgs e)
+        {
+            var clickedItem = (ToolStripMenuItem)sender;
+            string clickedId = (string)clickedItem.Tag;
+
+            usePerMonitorMode = true;
+
+            if (enabledMonitors.Contains(clickedId))
+            {
+                // Clicking an active monitor deselects it (allow none)
+                enabledMonitors.Remove(clickedId);
+                if (enabledMonitors.Count == 0)
                 {
-                    if (mainLoopPaused)
-                    {
-                        mainLoopPaused = false;
-                    }
-                    usePerMonitorMode = true;
-                    var item = (ToolStripMenuItem)s;
-                    string monitorId = (string)item.Tag;
+                    mainLoopPaused = true;
+                    StopEffect();
+                }
+                else
+                {
+                    // Single select: shouldn't happen, but just in case
+                    SyncMagnifierWindowsWithEnabledMonitors();
+                }
+            }
+            else
+            {
+                // Single-select: clear others first
+                enabledMonitors.Clear();
+                enabledMonitors.Add(clickedId);
 
-                    if (enabledMonitors.Contains(monitorId))
-                    {
-                        enabledMonitors.Remove(monitorId);
-                        DisableMagnifierWindow(monitorId);
-                    }
-                    else
-                    {
-                        enabledMonitors.Add(monitorId);
-                        EnableMagnifierWindow(monitorId);
-                    }
-
-                    UpdateMonitorMenuChecks();
-                };
-                selectMonitorsToolStripMenuItem.DropDownItems.Add(monitorItem);
+                if (mainLoopPaused)
+                {
+                    mainLoopPaused = false;
+                    StartEffect();
+                }
+                else
+                {
+                    SyncMagnifierWindowsWithEnabledMonitors();
+                }
             }
 
-            selectMonitorsToolStripMenuItem.DropDownItems.Add(new ToolStripSeparator());
-
-            var brightnessItem = new ToolStripMenuItem("Adjust Brightness/Contrast...");
-            brightnessItem.Click += (s, e) =>
-            {
-                ShowBrightnessContrastDialog();
-            };
-            selectMonitorsToolStripMenuItem.DropDownItems.Add(brightnessItem);
+            UpdateMonitorMenuChecks();
         }
 
         private void UpdateMonitorMenuChecks()
         {
-            bool isActive = !mainLoopPaused;
-            foreach (var item in selectMonitorsToolStripMenuItem.DropDownItems)
+            for (int i = monitorMenuInsertIndex; i < monitorMenuInsertIndex + monitorMenuItemCount; i++)
             {
-                ToolStripMenuItem menuItem = item as ToolStripMenuItem;
+                var menuItem = trayIconContextMenuStrip.Items[i] as ToolStripMenuItem;
                 if (menuItem != null)
                 {
                     string tag = menuItem.Tag as string;
                     if (tag != null)
                     {
-                        if (tag == "all")
-                        {
-                            menuItem.Checked = isActive && !usePerMonitorMode;
-                        }
-                        else
-                        {
-                            menuItem.Checked = isActive && (enabledMonitors.Contains(tag) || !usePerMonitorMode);
-                        }
+                        menuItem.Checked = enabledMonitors.Contains(tag);
                     }
                 }
             }
-        }
-
-        private void ShowBrightnessContrastDialog()
-        {
-            using (var dialog = new BrightnessContrastDialog(globalBrightness, globalContrast))
-            {
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    globalBrightness = dialog.Brightness;
-                    globalContrast = dialog.Contrast;
-                    ApplyCurrentEffectToAllMonitors();
-                }
-            }
-        }
-
-        private void InitializeControlLoop()
-        {
-            System.Threading.Thread t = new System.Threading.Thread(ControlLoop);
-            t.SetApartmentState((System.Threading.ApartmentState.STA));
-            t.Start();
-        }
-
-        private void ControlLoop()
-        {
-            while (!exiting)
-            {
-                while (mainLoopPaused && !exiting)
-                {
-                    System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
-                    DoMagnifierApiInvoke();
-                }
-
-                if (exiting) break;
-
-                lock (magInitLock)
-                {
-                    if (!NativeMethods.MagInitialize())
-                    {
-                        throw new Exception("MagInitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-                    }
-                    magInitialized = true;
-                }
-
-                try
-                {
-                    if (usePerMonitorMode)
-                    {
-                        CreateMagnifierWindowsForEnabledMonitors();
-                    }
-                    else
-                    {
-                        ToggleColorEffect(fromNormal: true);
-                    }
-                }
-                catch (CannotChangeColorEffectException)
-                {
-                    mainLoopPaused = true;
-                }
-
-                while (!exiting && !mainLoopPaused)
-                {
-                    System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
-                    DoMagnifierApiInvoke();
-                    RefreshMagnifierWindows();
-                }
-
-                try
-                {
-                    if (usePerMonitorMode)
-                    {
-                        DisableAllMagnifierWindows();
-                    }
-                    else
-                    {
-                        ToggleColorEffect(fromNormal: false);
-                    }
-                    NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
-                }
-                catch (CannotChangeColorEffectException)
-                {
-                }
-
-                lock (magInitLock)
-                {
-                    if (!NativeMethods.MagUninitialize())
-                    {
-                        throw new Exception("MagUninitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-                    }
-                    magInitialized = false;
-                }
-            }
-            this.Invoke((Action)(() =>
-            {
-                this.Dispose();
-                Application.Exit();
-            }));
         }
 
         private void CreateMagnifierWindowsForEnabledMonitors()
@@ -420,7 +473,7 @@ namespace NegativeScreen
             {
                 if (kvp.Value.IsEnabled)
                 {
-                    kvp.Value.Show();
+                    kvp.Value.Refresh();
                 }
             }
         }
@@ -433,41 +486,40 @@ namespace NegativeScreen
             }
         }
 
-        private void EnableMagnifierWindow(string monitorId)
+        /// <summary>
+        /// 在 ControlLoop 线程上同步 magnifierWindows 与 enabledMonitors。
+        /// 确保所有窗口的创建和销毁都在同一个线程上，避免跨线程 DestroyWindow 失败。
+        /// </summary>
+        private void SyncMagnifierWindowsWithEnabledMonitors()
         {
-            int waitCount = 0;
-            while (!magInitialized && waitCount < 100)
+            // 禁用不再启用的显示器的窗口
+            foreach (var kvp in magnifierWindows.ToList())
             {
-                System.Threading.Thread.Sleep(50);
-                waitCount++;
-            }
-            if (!magInitialized)
-            {
-                return;
+                if (!enabledMonitors.Contains(kvp.Key) && kvp.Value.IsEnabled)
+                {
+                    kvp.Value.Disable();
+                }
             }
 
-            var monitor = MonitorManager.Monitors.FirstOrDefault(m => m.UniqueId == monitorId);
-            if (monitor != null)
+            // 为新启用的显示器创建/启用窗口
+            foreach (var monitorId in enabledMonitors.ToList())
             {
                 MagnifierWindow window;
-                if (!magnifierWindows.TryGetValue(monitorId, out window))
+                if (!magnifierWindows.TryGetValue(monitorId, out window) || !window.IsEnabled)
                 {
-                    window = new MagnifierWindow(monitor);
-                    magnifierWindows[monitorId] = window;
+                    var monitor = MonitorManager.Monitors.FirstOrDefault(m => m.UniqueId == monitorId);
+                    if (monitor != null)
+                    {
+                        if (window == null)
+                        {
+                            window = new MagnifierWindow(monitor);
+                            magnifierWindows[monitorId] = window;
+                        }
+                        window.SetColorEffect(currentMatrix);
+                        window.SetBrightnessContrast(globalBrightness, globalContrast);
+                        window.Enable();
+                    }
                 }
-
-                MonitorSettings settings;
-                if (monitorSettings.TryGetValue(monitorId, out settings))
-                {
-                    window.SetColorEffect(settings.ColorEffect);
-                    window.SetBrightnessContrast(settings.Brightness, settings.Contrast);
-                }
-                else
-                {
-                    window.SetColorEffect(currentMatrix);
-                    window.SetBrightnessContrast(globalBrightness, globalContrast);
-                }
-                window.Enable();
             }
         }
 
@@ -484,30 +536,12 @@ namespace NegativeScreen
         {
             if (usePerMonitorMode)
             {
-                foreach (var monitorId in enabledMonitors)
-                {
-                    MagnifierWindow window;
-                    if (magnifierWindows.TryGetValue(monitorId, out window))
-                    {
-                        float[,] finalMatrix = BuiltinMatrices.ApplyBrightnessContrast(currentMatrix, globalBrightness, globalContrast);
-                        window.SetColorEffect(currentMatrix);
-                        window.SetBrightnessContrast(globalBrightness, globalContrast);
-                    }
-                }
+                brightnessContrastNeedsUpdate = true;
             }
             else
             {
                 float[,] finalMatrix = BuiltinMatrices.ApplyBrightnessContrast(currentMatrix, globalBrightness, globalContrast);
                 SafeChangeColorEffect(finalMatrix);
-            }
-        }
-
-        private void PauseLoop()
-        {
-            while (mainLoopPaused && !exiting)
-            {
-                System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
-                DoMagnifierApiInvoke();
             }
         }
 
@@ -568,6 +602,39 @@ namespace NegativeScreen
             base.WndProc(ref m);
         }
 
+        private Timer logicTimer;
+
+        private void InitializeControlLoop()
+        {
+            logicTimer = new Timer();
+            logicTimer.Interval = Configuration.Current.MainLoopRefreshTime;
+            logicTimer.Tick += LogicTimer_Tick;
+            logicTimer.Start();
+        }
+
+        private void LogicTimer_Tick(object sender, EventArgs e)
+        {
+            DoMagnifierApiInvoke();
+
+            if (!exiting && !mainLoopPaused)
+            {
+                if (usePerMonitorMode)
+                {
+                    SyncMagnifierWindowsWithEnabledMonitors();
+                    if (brightnessContrastNeedsUpdate)
+                    {
+                        foreach (var window in magnifierWindows.Values)
+                        {
+                            window.SetColorEffect(currentMatrix);
+                            window.SetBrightnessContrast(globalBrightness, globalContrast);
+                        }
+                        brightnessContrastNeedsUpdate = false;
+                    }
+                    RefreshMagnifierWindows();
+                }
+            }
+        }
+
         private void HandleDisplayChange()
         {
             MonitorManager.Refresh();
@@ -588,18 +655,93 @@ namespace NegativeScreen
             }
         }
 
-        public void Exit()
+        public void Toggle()
         {
-            if (!mainLoopPaused)
+            if (mainLoopPaused)
+            {
+                // 激活时默认使用最后一个显示器（扩展显示器）
+                MonitorManager.Refresh();
+                var monitors = MonitorManager.Monitors;
+                if (monitors.Count > 1)
+                {
+                    usePerMonitorMode = true;
+                    var lastMonitor = monitors[monitors.Count - 1];
+                    if (!enabledMonitors.Contains(lastMonitor.UniqueId))
+                    {
+                        enabledMonitors.Clear();
+                        enabledMonitors.Add(lastMonitor.UniqueId);
+                    }
+                }
+                this.mainLoopPaused = false;
+                StartEffect();
+            }
+            else
+            {
+                this.mainLoopPaused = true;
+                StopEffect();
+            }
+
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(UpdateMonitorMenuChecks));
+            }
+            else
+            {
+                UpdateMonitorMenuChecks();
+            }
+        }
+
+        private void StartEffect()
+        {
+            lock (magInitLock)
+            {
+                if (!magInitialized)
+                {
+                    if (!NativeMethods.MagInitialize())
+                    {
+                        throw new Exception("MagInitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+                    }
+                    magInitialized = true;
+                }
+            }
+
+            // Ensure fullscreen transform is identity so primary screen UI is not distorted
+            NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
+
+            try
+            {
+                if (usePerMonitorMode)
+                {
+                    CreateMagnifierWindowsForEnabledMonitors();
+                    RefreshMagnifierWindows();
+                }
+                else
+                {
+                    ToggleColorEffect(fromNormal: true);
+                }
+            }
+            catch (CannotChangeColorEffectException)
             {
                 mainLoopPaused = true;
             }
-            this.exiting = true;
         }
 
-        public void Toggle()
+        private void StopEffect()
         {
-            this.mainLoopPaused = !mainLoopPaused;
+            try
+            {
+                if (usePerMonitorMode)
+                {
+                    DisableAllMagnifierWindows();
+                }
+                else
+                {
+                    ToggleColorEffect(fromNormal: false);
+                }
+            }
+            catch (CannotChangeColorEffectException) { }
+
+            NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
         }
 
         public void Enable()
@@ -628,6 +770,7 @@ namespace NegativeScreen
 
         private void ToggleColorEffect(bool fromNormal)
         {
+            // 确保全屏放大倍率为 1.0（不放大），仅应用颜色效果
             NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
 
             if (fromNormal)
@@ -699,26 +842,39 @@ namespace NegativeScreen
             base.Dispose(disposing);
         }
 
-        private void SynchronizeMenuItemCheckboxesWithEffect(ScreenColorEffect effect)
-        {
-            ToolStripMenuItem currentItem = null;
-            foreach (ToolStripMenuItem effectItem in this.changeModeToolStripMenuItem.DropDownItems)
-            {
-                effectItem.Checked = false;
-                var castItem = (ScreenColorEffect)effectItem.Tag;
-                if (castItem.Matrix == effect.Matrix) currentItem = effectItem;
-            }
-            if (currentItem != null)
-            {
-                currentItem.Checked = true;
-            }
-        }
 
         #region Event Handlers
 
         private void OverlayManager_FormClosed(object sender, FormClosedEventArgs e)
         {
             Exit();
+        }
+
+        public void Exit()
+        {
+            this.exiting = true;
+
+            if (logicTimer != null)
+            {
+                logicTimer.Stop();
+                logicTimer.Dispose();
+                logicTimer = null;
+            }
+
+            StopEffect();
+            UnregisterHotKeys();
+
+            lock (magInitLock)
+            {
+                if (magInitialized)
+                {
+                    NativeMethods.MagUninitialize();
+                    magInitialized = false;
+                }
+            }
+
+            this.trayIcon.Visible = false;
+            Application.Exit();
         }
 
         private void toggleInversionToolStripMenuItem_Click(object sender, EventArgs e)
@@ -762,118 +918,5 @@ namespace NegativeScreen
         public float Contrast { get; set; }
         public float[,] ColorEffect { get; set; }
         public bool IsEnabled { get; set; }
-    }
-
-    public class BrightnessContrastDialog : Form
-    {
-        private TrackBar brightnessTrackBar;
-        private TrackBar contrastTrackBar;
-        private Label brightnessLabel;
-        private Label contrastLabel;
-        private Button okButton;
-        private Button cancelButton;
-
-        public float Brightness { get; private set; }
-        public float Contrast { get; private set; }
-
-        public BrightnessContrastDialog(float currentBrightness, float currentContrast)
-        {
-            Brightness = currentBrightness;
-            Contrast = currentContrast;
-
-            InitializeComponents();
-        }
-
-        private void InitializeComponents()
-        {
-            this.Text = "Adjust Brightness/Contrast";
-            this.Size = new Size(350, 200);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-
-            var brightnessLabelTitle = new Label
-            {
-                Text = "Brightness:",
-                Location = new Point(20, 20),
-                Size = new Size(80, 20)
-            };
-
-            brightnessTrackBar = new TrackBar
-            {
-                Minimum = -100,
-                Maximum = 100,
-                Value = (int)(Brightness * 100),
-                Location = new Point(100, 20),
-                Size = new Size(150, 45)
-            };
-            brightnessTrackBar.Scroll += BrightnessTrackBar_Scroll;
-
-            brightnessLabel = new Label
-            {
-                Text = Brightness.ToString("F2"),
-                Location = new Point(260, 20),
-                Size = new Size(60, 20)
-            };
-
-            var contrastLabelTitle = new Label
-            {
-                Text = "Contrast:",
-                Location = new Point(20, 70),
-                Size = new Size(80, 20)
-            };
-
-            contrastTrackBar = new TrackBar
-            {
-                Minimum = 0,
-                Maximum = 200,
-                Value = (int)(Contrast * 100),
-                Location = new Point(100, 70),
-                Size = new Size(150, 45)
-            };
-            contrastTrackBar.Scroll += ContrastTrackBar_Scroll;
-
-            contrastLabel = new Label
-            {
-                Text = Contrast.ToString("F2"),
-                Location = new Point(260, 70),
-                Size = new Size(60, 20)
-            };
-
-            okButton = new Button
-            {
-                Text = "OK",
-                DialogResult = DialogResult.OK,
-                Location = new Point(150, 130),
-                Size = new Size(75, 25)
-            };
-
-            cancelButton = new Button
-            {
-                Text = "Cancel",
-                DialogResult = DialogResult.Cancel,
-                Location = new Point(240, 130),
-                Size = new Size(75, 25)
-            };
-
-            this.Controls.AddRange(new Control[] {
-                brightnessLabelTitle, brightnessTrackBar, brightnessLabel,
-                contrastLabelTitle, contrastTrackBar, contrastLabel,
-                okButton, cancelButton
-            });
-        }
-
-        private void BrightnessTrackBar_Scroll(object sender, EventArgs e)
-        {
-            Brightness = brightnessTrackBar.Value / 100.0f;
-            brightnessLabel.Text = Brightness.ToString("F2");
-        }
-
-        private void ContrastTrackBar_Scroll(object sender, EventArgs e)
-        {
-            Contrast = contrastTrackBar.Value / 100.0f;
-            contrastLabel.Text = Contrast.ToString("F2");
-        }
     }
 }

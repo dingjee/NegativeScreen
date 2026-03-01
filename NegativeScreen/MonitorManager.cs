@@ -32,6 +32,7 @@ namespace NegativeScreen
         public Rectangle Bounds { get; set; }
         public bool IsPrimary { get; set; }
         public int Index { get; set; }
+        public Rectangle PhysicalBounds { get; set; }
 
         public override string ToString()
         {
@@ -114,12 +115,21 @@ namespace NegativeScreen
                     string deviceName = monitorInfoEx.szDevice;
                     string friendlyName = GetMonitorFriendlyName(hMonitor, deviceName);
 
+                    DEVMODE devMode = new DEVMODE();
+                    devMode.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+                    Rectangle physicalBounds = bounds;
+                    if (EnumDisplaySettings(deviceName, -1 /*ENUM_CURRENT_SETTINGS*/, ref devMode))
+                    {
+                        physicalBounds = new Rectangle(devMode.dmPositionX, devMode.dmPositionY, devMode.dmPelsWidth, devMode.dmPelsHeight);
+                    }
+
                     monitors.Add(new MonitorInfo
                     {
                         Handle = hMonitor,
                         DeviceName = deviceName,
                         FriendlyName = friendlyName,
                         Bounds = bounds,
+                        PhysicalBounds = physicalBounds,
                         IsPrimary = (monitorInfoEx.dwFlags & 1) != 0,
                         Index = index++
                     });
@@ -184,6 +194,9 @@ namespace NegativeScreen
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern bool EnumDisplaySettings(string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern bool EnumDisplayDevices(string lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);

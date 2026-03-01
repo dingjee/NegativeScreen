@@ -91,6 +91,21 @@ EnableApi=false
 # If you do so, also remember to add an exception to your firewall.
 ApiListeningUri=http://localhost:8990/
 
+# Set to true to add NegativeScreen to Windows startup
+RunOnStartup=false
+
+# Manual fix for multi-monitor DPI issues (only applies to non-primary monitors)
+# Set UseManualMagnifierWorkarounds=true to enable it.
+UseManualMagnifierWorkarounds=true
+MagnifierScaleX=0.75
+MagnifierScaleY=0.75
+MagnifierOffsetX=0
+MagnifierOffsetY=0
+
+# Saved brightness and contrast values (auto-updated by the app)
+SavedBrightness=0.0
+SavedContrast=1.0
+
 # Matrices definitions
 # The left hand is used as a description, while the right hand is broken down in two parts:
 # - the hot key combination, followed by a new line, (this part is optional)
@@ -401,6 +416,50 @@ Binary (Black and white)=
 			}
 		}
 
+		/// <summary>
+		/// Update a single key=value in the active conf file.
+		/// If the key exists on a line, replace that line. Otherwise append.
+		/// </summary>
+		public static void SaveValue(string key, string value)
+		{
+			try
+			{
+				string confPath;
+				switch (Current.Source)
+				{
+					case ConfigurationLocation.AppData:
+						confPath = Current.AppDataConfigurationFileName;
+						break;
+					case ConfigurationLocation.WorkingDirectory:
+					default:
+						confPath = Current.WorkingDirectoryConfigurationFileName;
+						break;
+				}
+
+				if (!File.Exists(confPath)) return;
+
+				var lines = new List<string>(File.ReadAllLines(confPath));
+				bool found = false;
+				string prefix = key + "=";
+				for (int i = 0; i < lines.Count; i++)
+				{
+					string trimmed = lines[i].TrimStart();
+					if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+					{
+						lines[i] = key + "=" + value;
+						found = true;
+						break;
+					}
+				}
+				if (!found)
+				{
+					lines.Add(key + "=" + value);
+				}
+				File.WriteAllLines(confPath, lines.ToArray());
+			}
+			catch (Exception) { }
+		}
+
 		[MatchingKey("Toggle", CustomParameter = HotKey.ToggleKeyId)]
 		public HotKey ToggleKey { get; protected set; }
 
@@ -427,6 +486,30 @@ Binary (Black and white)=
 
 		[MatchingKey("ApiListeningUri", CustomParameter = "http://localhost:8990/")]
 		public string ApiListeningUri { get; protected set; }
+
+		[MatchingKey("RunOnStartup", CustomParameter = false)]
+		public bool RunOnStartup { get; protected set; }
+
+		[MatchingKey("UseManualMagnifierWorkarounds", CustomParameter = false)]
+		public bool UseManualMagnifierWorkarounds { get; protected set; }
+
+		[MatchingKey("MagnifierScaleX", CustomParameter = 0.75f)]
+		public float MagnifierScaleX { get; protected set; }
+
+		[MatchingKey("MagnifierScaleY", CustomParameter = 0.75f)]
+		public float MagnifierScaleY { get; protected set; }
+
+		[MatchingKey("MagnifierOffsetX", CustomParameter = 0)]
+		public int MagnifierOffsetX { get; protected set; }
+
+		[MatchingKey("MagnifierOffsetY", CustomParameter = 0)]
+		public int MagnifierOffsetY { get; protected set; }
+
+		[MatchingKey("SavedBrightness", CustomParameter = 0.0f)]
+		public float SavedBrightness { get; protected set; }
+
+		[MatchingKey("SavedContrast", CustomParameter = 1.0f)]
+		public float SavedContrast { get; protected set; }
 
 		[MatchingKey("InitialColorEffect")]
 		public string InitialColorEffectName { get; protected set; }

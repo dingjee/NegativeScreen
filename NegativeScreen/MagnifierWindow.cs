@@ -26,7 +26,6 @@ namespace NegativeScreen
     {
         private IntPtr _hwnd;
         private MonitorInfo _monitor;
-        private float[,] _currentMatrix;
         private bool _isCreated;
         private bool _isEnabled;
         private float _brightness = 0.0f;
@@ -41,7 +40,26 @@ namespace NegativeScreen
         private const int WS_EX_LAYERED = 0x00080000;
         private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int WS_EX_NOACTIVATE = 0x08000000;
+        private const int WS_EX_TOOLWINDOW = 0x00000080;
         private const int WS_POPUP = -2147483648;
+
+        private class MagnifierHostForm : System.Windows.Forms.Form
+        {
+            protected override System.Windows.Forms.CreateParams CreateParams
+            {
+                get
+                {
+                    var cp = base.CreateParams;
+                    cp.ExStyle |= WS_EX_LAYERED;
+                    cp.ExStyle |= WS_EX_TRANSPARENT;
+                    cp.ExStyle |= WS_EX_NOACTIVATE;
+                    cp.ExStyle |= WS_EX_TOOLWINDOW;
+                    return cp;
+                }
+            }
+        }
+
+        private MagnifierHostForm _hostForm;
 
         private const int HWND_TOPMOST = -1;
         private const int SWP_SHOWWINDOW = 0x0040;
@@ -90,19 +108,29 @@ namespace NegativeScreen
 
             IntPtr hInstance = NativeMethods.GetModuleHandle(null);
 
-            int style = WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-            int exStyle = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
+            _hostForm = new MagnifierHostForm();
+            _hostForm.Text = "MagnifierHost_" + _monitor.Index;
+            _hostForm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
+            _hostForm.ShowInTaskbar = false;
+            _hostForm.TopMost = true;
+            _hostForm.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
+            _hostForm.Bounds = new Rectangle(_monitor.Bounds.X, _monitor.Bounds.Y, _monitor.Bounds.Width, _monitor.Bounds.Height);
+            _hostForm.BackColor = Color.Black;
+            _hostForm.Show();
+
+            NativeMethods.SetLayeredWindowAttributes(_hostForm.Handle, 0, 255, LayeredWindowAttributeFlags.LWA_ALPHA);
+
+            int magStyle = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 
             _hwnd = NativeMethods.CreateWindowEx(
-                exStyle,
+                0,
                 NativeMethods.WC_MAGNIFIER,
                 "MagnifierWindow_" + _monitor.Index,
-                style,
-                _monitor.Bounds.X,
-                _monitor.Bounds.Y,
+                magStyle,
+                0, 0,
                 _monitor.Bounds.Width,
                 _monitor.Bounds.Height,
-                IntPtr.Zero,
+                _hostForm.Handle,
                 IntPtr.Zero,
                 hInstance,
                 IntPtr.Zero
@@ -113,7 +141,7 @@ namespace NegativeScreen
                 throw new Exception(string.Format("Failed to create magnifier window: {0}", Marshal.GetLastWin32Error()));
             }
 
-            NativeMethods.SetWindowPos(_hwnd, new IntPtr(HWND_TOPMOST),
+            NativeMethods.SetWindowPos(_hostForm.Handle, new IntPtr(HWND_TOPMOST),
                 _monitor.Bounds.X, _monitor.Bounds.Y,
                 _monitor.Bounds.Width, _monitor.Bounds.Height,
                 SWP_SHOWWINDOW | SWP_NOACTIVATE);
@@ -121,11 +149,27 @@ namespace NegativeScreen
             NativeMethods.SetLayeredWindowAttributes(_hwnd, 0, 255, LayeredWindowAttributeFlags.LWA_ALPHA);
 
             var transform = new Transformation(1.0f);
+            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            {
+                transform.m00 = Configuration.Current.MagnifierScaleX;
+                transform.m11 = Configuration.Current.MagnifierScaleY;
+            }
             NativeMethods.MagSetWindowTransform(_hwnd, ref transform);
 
-            var sourceRect = new RECT(_monitor.Bounds.X, _monitor.Bounds.Y,
-                _monitor.Bounds.X + _monitor.Bounds.Width,
-                _monitor.Bounds.Y + _monitor.Bounds.Height);
+            int sx = _monitor.PhysicalBounds.X;
+            int sy = _monitor.PhysicalBounds.Y;
+            int sw = _monitor.PhysicalBounds.Width;
+            int sh = _monitor.PhysicalBounds.Height;
+
+            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            {
+                sx += Configuration.Current.MagnifierOffsetX;
+                sy += Configuration.Current.MagnifierOffsetY;
+                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
+                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+            }
+
+            var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
             NativeMethods.MagSetWindowSource(_hwnd, sourceRect);
 
             _isCreated = true;
@@ -168,26 +212,38 @@ namespace NegativeScreen
             return result;
         }
 
+        /// <summary>
+        /// Brightness matrix for the Magnification API 5x5 color matrix.
+        /// Uses the translation row (row 4) to shift RGB channels.
+        /// Range optimized for e-ink: -0.3 to +0.3 provides fine control
+        /// without washing out to full white.
+        /// </summary>
         private static float[,] CreateBrightnessMatrix(float brightness)
         {
             return new float[,] {
-                { 1, 0, 0, 0, brightness },
-                { 0, 1, 0, 0, brightness },
-                { 0, 0, 1, 0, brightness },
+                { 1, 0, 0, 0, 0 },
+                { 0, 1, 0, 0, 0 },
+                { 0, 0, 1, 0, 0 },
                 { 0, 0, 0, 1, 0 },
-                { 0, 0, 0, 0, 1 }
+                { brightness, brightness, brightness, 0, 1 }
             };
         }
 
+        /// <summary>
+        /// Contrast matrix optimized for e-ink displays.
+        /// Scales RGB around 0.5 midpoint, preserving blacker blacks
+        /// while enhancing text/background separation.
+        /// Range: 0.5 (low contrast, washed out) to 2.0 (high contrast, sharp edges)
+        /// </summary>
         private static float[,] CreateContrastMatrix(float contrast)
         {
-            float offset = (1.0f - contrast) / 2.0f;
+            float offset = 0.5f * (1.0f - contrast);
             return new float[,] {
-                { contrast, 0, 0, 0, offset },
-                { 0, contrast, 0, 0, offset },
-                { 0, 0, contrast, 0, offset },
+                { contrast, 0, 0, 0, 0 },
+                { 0, contrast, 0, 0, 0 },
+                { 0, 0, contrast, 0, 0 },
                 { 0, 0, 0, 1, 0 },
-                { 0, 0, 0, 0, 1 }
+                { offset, offset, offset, 0, 1 }
             };
         }
 
@@ -198,28 +254,39 @@ namespace NegativeScreen
                 Create();
             }
 
-            var transform = new Transformation();
-            transform.m00 = 1.0f;
-            transform.m01 = 0.0f;
-            transform.m02 = 0.0f;
-            transform.m10 = 0.0f;
-            transform.m11 = 1.0f;
-            transform.m12 = 0.0f;
-            transform.m20 = 0.0f;
-            transform.m21 = 0.0f;
-            transform.m22 = 1.0f;
+            var transform = new Transformation(1.0f);
+            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            {
+                transform.m00 = Configuration.Current.MagnifierScaleX;
+                transform.m11 = Configuration.Current.MagnifierScaleY;
+            }
             NativeMethods.MagSetWindowTransform(_hwnd, ref transform);
 
             _isEnabled = true;
             SetColorEffect(_baseColorMatrix);
 
-            NativeMethods.SetWindowPos(_hwnd, new IntPtr(HWND_TOPMOST),
-                _monitor.Bounds.X, _monitor.Bounds.Y,
-                _monitor.Bounds.Width, _monitor.Bounds.Height,
-                SWP_SHOWWINDOW | SWP_NOACTIVATE);
-            var sourceRect = new RECT(_monitor.Bounds.X, _monitor.Bounds.Y,
-                _monitor.Bounds.X + _monitor.Bounds.Width,
-                _monitor.Bounds.Y + _monitor.Bounds.Height);
+            if (_hostForm != null)
+            {
+                NativeMethods.SetWindowPos(_hostForm.Handle, new IntPtr(HWND_TOPMOST),
+                    _monitor.Bounds.X, _monitor.Bounds.Y,
+                    _monitor.Bounds.Width, _monitor.Bounds.Height,
+                    SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            }
+
+            int sx = _monitor.PhysicalBounds.X;
+            int sy = _monitor.PhysicalBounds.Y;
+            int sw = _monitor.PhysicalBounds.Width;
+            int sh = _monitor.PhysicalBounds.Height;
+
+            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            {
+                sx += Configuration.Current.MagnifierOffsetX;
+                sy += Configuration.Current.MagnifierOffsetY;
+                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
+                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+            }
+
+            var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
             NativeMethods.MagSetWindowSource(_hwnd, sourceRect);
         }
 
@@ -233,15 +300,53 @@ namespace NegativeScreen
                 NativeMethods.MagSetWindowSource(_hwnd, emptyRect);
                 NativeMethods.DestroyWindow(_hwnd);
                 _hwnd = IntPtr.Zero;
-                _isCreated = false;
             }
+            if (_hostForm != null)
+            {
+                if (!_hostForm.IsDisposed)
+                {
+                    _hostForm.Close();
+                    _hostForm.Dispose();
+                }
+                _hostForm = null;
+            }
+            _isCreated = false;
+        }
+
+        /// <summary>
+        /// Re-set the source rect to force DWM to re-capture the screen.
+        /// WC_MAGNIFIER only captures one frame per MagSetWindowSource call.
+        /// This MUST be called repeatedly on a timer for live screen updates.
+        /// </summary>
+        public void Refresh()
+        {
+            if (!_isCreated || !_isEnabled || _hwnd == IntPtr.Zero)
+                return;
+
+            int sx = _monitor.PhysicalBounds.X;
+            int sy = _monitor.PhysicalBounds.Y;
+            int sw = _monitor.PhysicalBounds.Width;
+            int sh = _monitor.PhysicalBounds.Height;
+
+            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            {
+                sx += Configuration.Current.MagnifierOffsetX;
+                sy += Configuration.Current.MagnifierOffsetY;
+                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
+                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+            }
+
+            var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
+            NativeMethods.MagSetWindowSource(_hwnd, sourceRect);
+
+            NativeMethods.InvalidateRect(_hwnd, IntPtr.Zero, true);
         }
 
         public void Show()
         {
-            if (_hwnd != IntPtr.Zero)
+            if (_hostForm != null && !_hostForm.IsDisposed)
             {
-                NativeMethods.SetWindowPos(_hwnd, new IntPtr(HWND_TOPMOST),
+                NativeMethods.SetWindowPos(_hostForm.Handle, new IntPtr(HWND_TOPMOST),
                     _monitor.Bounds.X, _monitor.Bounds.Y,
                     _monitor.Bounds.Width, _monitor.Bounds.Height,
                     SWP_SHOWWINDOW | SWP_NOACTIVATE);
@@ -250,11 +355,11 @@ namespace NegativeScreen
 
         public void Hide()
         {
-            if (_hwnd != IntPtr.Zero)
+            if (_hostForm != null && !_hostForm.IsDisposed)
             {
-                NativeMethods.SetWindowPos(_hwnd, new IntPtr(HWND_TOPMOST),
+                NativeMethods.SetWindowPos(_hostForm.Handle, new IntPtr(HWND_TOPMOST),
                     0, 0, 0, 0,
-                    0x0001 | 0x0002 | 0x0080);
+                    0x0001 | 0x0002 | 0x0080); // SWP_NOSIZE | SWP_NOMOVE | SWP_HIDEWINDOW
             }
         }
 
@@ -268,9 +373,20 @@ namespace NegativeScreen
                 newBounds.Width, newBounds.Height,
                 SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
-            var sourceRect = new RECT(newBounds.X, newBounds.Y,
-                newBounds.X + newBounds.Width,
-                newBounds.Y + newBounds.Height);
+            int sx = _monitor.PhysicalBounds.X;
+            int sy = _monitor.PhysicalBounds.Y;
+            int sw = _monitor.PhysicalBounds.Width;
+            int sh = _monitor.PhysicalBounds.Height;
+
+            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            {
+                sx += Configuration.Current.MagnifierOffsetX;
+                sy += Configuration.Current.MagnifierOffsetY;
+                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
+                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+            }
+
+            var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
             NativeMethods.MagSetWindowSource(_hwnd, sourceRect);
         }
 

@@ -88,6 +88,27 @@ http://x2a.yt?negativescreen", "Warning", MessageBoxButtons.OK, MessageBoxIcon.E
 
 			OverlayManager.Initialize();
 
+			// Handle RunOnStartup: add or remove registry key
+			try
+			{
+				string appPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+				using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+				{
+					if (key != null)
+					{
+						if (Configuration.Current.RunOnStartup)
+						{
+							key.SetValue("NegativeScreen", "\"" + appPath + "\"");
+						}
+						else
+						{
+							key.DeleteValue("NegativeScreen", false);
+						}
+					}
+				}
+			}
+			catch (Exception) { }
+
 			if (Configuration.Current.EnableApi)
 			{
 				Api api = new Api(OverlayManager.Instance);

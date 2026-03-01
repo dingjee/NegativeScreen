@@ -168,6 +168,9 @@ namespace NegativeScreen
 		[DllImport("user32.dll", SetLastError = true)]
 		public static extern bool SetProcessDPIAware();
 
+		[DllImport("shcore.dll")]
+		public static extern int SetProcessDpiAwareness(int value);
+
 		/// <summary>
 		/// Undocumented function.
 		/// http://msdn.microsoft.com/en-us/library/windows/desktop/hh162714%28v=vs.85%29.aspx

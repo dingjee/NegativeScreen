@@ -109,13 +109,14 @@ namespace NegativeScreen
                 mainLoopPaused = true;
             }
 
-            InitializeContextMenu();
-
             currentMatrix = Configuration.Current.InitialColorEffect.Matrix;
 
-            // Load saved brightness/contrast from conf
+            // Load saved brightness/contrast from conf BEFORE building the UI
+            // so that the slider positions reflect the saved values.
             globalBrightness = Configuration.Current.SavedBrightness;
             globalContrast = Configuration.Current.SavedContrast;
+
+            InitializeContextMenu();
 
             InitializeMonitorSettings();
             InitializeControlLoop();

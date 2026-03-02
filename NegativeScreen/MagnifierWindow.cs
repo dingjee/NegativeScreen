@@ -101,6 +101,40 @@ namespace NegativeScreen
             _baseColorMatrix = BuiltinMatrices.Identity;
         }
 
+        /// <summary>
+        /// Get the magnifier scale for this (non-primary) monitor.
+        /// When UseManualMagnifierWorkarounds is true, uses the config values.
+        /// Otherwise, auto-computes as: thisMonitor.DpiScale / primaryMonitor.DpiScale.
+        /// </summary>
+        private float GetMagnifierScaleX()
+        {
+            if (Configuration.Current.UseManualMagnifierWorkarounds)
+                return Configuration.Current.MagnifierScaleX;
+            var primary = MonitorManager.GetPrimaryMonitor();
+            if (primary == null || primary.DpiScaleX == 0) return 1.0f;
+            return primary.DpiScaleX / _monitor.DpiScaleX;
+        }
+
+        private float GetMagnifierScaleY()
+        {
+            if (Configuration.Current.UseManualMagnifierWorkarounds)
+                return Configuration.Current.MagnifierScaleY;
+            var primary = MonitorManager.GetPrimaryMonitor();
+            if (primary == null || primary.DpiScaleY == 0) return 1.0f;
+            return primary.DpiScaleY / _monitor.DpiScaleY;
+        }
+
+        private bool ShouldApplyMagnifierWorkarounds()
+        {
+            if (_monitor.IsPrimary) return false;
+            if (Configuration.Current.UseManualMagnifierWorkarounds) return true;
+            // Auto-detect: apply workarounds if DPI differs from primary
+            var primary = MonitorManager.GetPrimaryMonitor();
+            if (primary == null) return false;
+            return Math.Abs(_monitor.DpiScaleX - primary.DpiScaleX) > 0.01f
+                || Math.Abs(_monitor.DpiScaleY - primary.DpiScaleY) > 0.01f;
+        }
+
         public void Create()
         {
             if (_isCreated)
@@ -149,10 +183,10 @@ namespace NegativeScreen
             NativeMethods.SetLayeredWindowAttributes(_hwnd, 0, 255, LayeredWindowAttributeFlags.LWA_ALPHA);
 
             var transform = new Transformation(1.0f);
-            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            if (ShouldApplyMagnifierWorkarounds())
             {
-                transform.m00 = Configuration.Current.MagnifierScaleX;
-                transform.m11 = Configuration.Current.MagnifierScaleY;
+                transform.m00 = GetMagnifierScaleX();
+                transform.m11 = GetMagnifierScaleY();
             }
             NativeMethods.MagSetWindowTransform(_hwnd, ref transform);
 
@@ -161,12 +195,12 @@ namespace NegativeScreen
             int sw = _monitor.PhysicalBounds.Width;
             int sh = _monitor.PhysicalBounds.Height;
 
-            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            if (ShouldApplyMagnifierWorkarounds())
             {
                 sx += Configuration.Current.MagnifierOffsetX;
                 sy += Configuration.Current.MagnifierOffsetY;
-                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
-                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+                sw = (int)(sw / GetMagnifierScaleX());
+                sh = (int)(sh / GetMagnifierScaleY());
             }
 
             var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
@@ -255,10 +289,10 @@ namespace NegativeScreen
             }
 
             var transform = new Transformation(1.0f);
-            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            if (ShouldApplyMagnifierWorkarounds())
             {
-                transform.m00 = Configuration.Current.MagnifierScaleX;
-                transform.m11 = Configuration.Current.MagnifierScaleY;
+                transform.m00 = GetMagnifierScaleX();
+                transform.m11 = GetMagnifierScaleY();
             }
             NativeMethods.MagSetWindowTransform(_hwnd, ref transform);
 
@@ -278,12 +312,12 @@ namespace NegativeScreen
             int sw = _monitor.PhysicalBounds.Width;
             int sh = _monitor.PhysicalBounds.Height;
 
-            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            if (ShouldApplyMagnifierWorkarounds())
             {
                 sx += Configuration.Current.MagnifierOffsetX;
                 sy += Configuration.Current.MagnifierOffsetY;
-                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
-                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+                sw = (int)(sw / GetMagnifierScaleX());
+                sh = (int)(sh / GetMagnifierScaleY());
             }
 
             var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
@@ -328,12 +362,12 @@ namespace NegativeScreen
             int sw = _monitor.PhysicalBounds.Width;
             int sh = _monitor.PhysicalBounds.Height;
 
-            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            if (ShouldApplyMagnifierWorkarounds())
             {
                 sx += Configuration.Current.MagnifierOffsetX;
                 sy += Configuration.Current.MagnifierOffsetY;
-                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
-                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+                sw = (int)(sw / GetMagnifierScaleX());
+                sh = (int)(sh / GetMagnifierScaleY());
             }
 
             var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);
@@ -378,12 +412,12 @@ namespace NegativeScreen
             int sw = _monitor.PhysicalBounds.Width;
             int sh = _monitor.PhysicalBounds.Height;
 
-            if (Configuration.Current.UseManualMagnifierWorkarounds && !_monitor.IsPrimary)
+            if (ShouldApplyMagnifierWorkarounds())
             {
                 sx += Configuration.Current.MagnifierOffsetX;
                 sy += Configuration.Current.MagnifierOffsetY;
-                sw = (int)(sw / Configuration.Current.MagnifierScaleX);
-                sh = (int)(sh / Configuration.Current.MagnifierScaleY);
+                sw = (int)(sw / GetMagnifierScaleX());
+                sh = (int)(sh / GetMagnifierScaleY());
             }
 
             var sourceRect = new RECT(sx, sy, sx + sw, sy + sh);

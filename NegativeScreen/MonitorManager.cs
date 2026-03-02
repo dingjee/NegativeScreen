@@ -34,6 +34,26 @@ namespace NegativeScreen
         public int Index { get; set; }
         public Rectangle PhysicalBounds { get; set; }
 
+        /// <summary>
+        /// DPI scale factor for this monitor (physical pixels / logical pixels).
+        /// E.g., 1.0 for 100% scaling, 1.25 for 125%, 1.5 for 150%.
+        /// </summary>
+        public float DpiScaleX
+        {
+            get
+            {
+                return Bounds.Width > 0 ? (float)PhysicalBounds.Width / Bounds.Width : 1.0f;
+            }
+        }
+
+        public float DpiScaleY
+        {
+            get
+            {
+                return Bounds.Height > 0 ? (float)PhysicalBounds.Height / Bounds.Height : 1.0f;
+            }
+        }
+
         public override string ToString()
         {
             string name = !string.IsNullOrEmpty(FriendlyName) ? FriendlyName : DeviceName;

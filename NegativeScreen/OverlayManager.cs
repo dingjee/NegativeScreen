@@ -308,29 +308,34 @@ namespace NegativeScreen
             var panel = new Panel { Width = 220, Height = 30 };
             panel.Padding = new Padding(0);
 
+            int savedContrastVal = (int)(globalContrast * 100);
+            if (savedContrastVal < 70) savedContrastVal = 70;
+            if (savedContrastVal > 130) savedContrastVal = 130;
+            globalContrast = savedContrastVal / 100.0f;
+
             contrastTrackBar = new TrackBar
             {
-                Minimum = 5,
-                Maximum = 20,
-                Value = (int)(globalContrast * 10),
-                TickFrequency = 1,
+                Minimum = 70,
+                Maximum = 130,
+                Value = savedContrastVal,
+                TickFrequency = 5,
                 SmallChange = 1,
-                LargeChange = 1,
+                LargeChange = 5,
                 Location = new Point(0, 2),
                 Size = new Size(170, 26),
                 AutoSize = false
             };
             contrastTrackBar.Scroll += (s, e) =>
             {
-                globalContrast = contrastTrackBar.Value / 10.0f;
-                contrastValueLabel.Text = globalContrast.ToString("F1");
+                globalContrast = contrastTrackBar.Value / 100.0f;
+                contrastValueLabel.Text = globalContrast.ToString("F2");
                 ApplyCurrentEffectToAllMonitors();
-                Configuration.SaveValue("SavedContrast", globalContrast.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
+                Configuration.SaveValue("SavedContrast", globalContrast.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
             };
 
             contrastValueLabel = new Label
             {
-                Text = globalContrast.ToString("F1"),
+                Text = globalContrast.ToString("F2"),
                 Location = new Point(172, 6),
                 Size = new Size(45, 18),
                 TextAlign = System.Drawing.ContentAlignment.MiddleRight

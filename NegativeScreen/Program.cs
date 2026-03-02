@@ -78,10 +78,12 @@ http://x2a.yt?negativescreen", "Warning", MessageBoxButtons.OK, MessageBoxIcon.E
 				}
 				return;
 			}
-			// without this call, and with custom DPI settings,
-			// the magnified window is either partially out of the screen,
-			// or blurry, if the transformation scale is forced to 1.
-			NativeMethods.SetProcessDPIAware();
+			// Per-Monitor DPI Aware V2: each monitor gets its native physical coordinates.
+			// This allows the magnifier to work at native resolution on every monitor,
+			// eliminating blurriness from DPI virtualization + rescaling.
+			// Falls back to System DPI Aware on older Windows versions.
+			try { NativeMethods.SetProcessDpiAwareness(2); }
+			catch { NativeMethods.SetProcessDPIAware(); }
 
 			Application.EnableVisualStyles();
 			Application.AddMessageFilter(new UserMessageFilter());

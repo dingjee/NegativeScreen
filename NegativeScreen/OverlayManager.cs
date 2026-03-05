@@ -38,6 +38,16 @@ namespace NegativeScreen
         private bool exiting = false;
         private float[,] currentMatrix = null;
 
+        /// <summary>
+        /// Whether the color inversion effect is currently active.
+        /// When false, brightness/contrast may still be active via Identity matrix.
+        /// </summary>
+        private bool colorEffectActive = true;
+        /// <summary>
+        /// Saved color matrix when color effect is toggled off, so it can be restored on toggle on.
+        /// </summary>
+        private float[,] savedColorMatrix = null;
+
         private bool usePerMonitorMode = false;
         private Dictionary<string, MagnifierWindow> magnifierWindows = new Dictionary<string, MagnifierWindow>();
         private Dictionary<string, MonitorSettings> monitorSettings = new Dictionary<string, MonitorSettings>();
@@ -107,6 +117,7 @@ namespace NegativeScreen
             if (!Configuration.Current.ActiveOnStartup)
             {
                 mainLoopPaused = true;
+                colorEffectActive = false;
             }
 
             currentMatrix = Configuration.Current.InitialColorEffect.Matrix;
@@ -538,8 +549,26 @@ namespace NegativeScreen
             }
         }
 
+        /// <summary>
+        /// Returns true if brightness or contrast differ from their defaults (0.0 and 1.0).
+        /// </summary>
+        private bool HasNonDefaultBrightnessContrast()
+        {
+            return Math.Abs(globalBrightness) > 0.001f || Math.Abs(globalContrast - 1.0f) > 0.001f;
+        }
+
         private void ApplyCurrentEffectToAllMonitors()
         {
+            if (mainLoopPaused && HasNonDefaultBrightnessContrast())
+            {
+                // Brightness/contrast changed while paused — need to activate overlay with Identity color
+                mainLoopPaused = false;
+                colorEffectActive = false;
+                currentMatrix = BuiltinMatrices.Identity;
+                StartEffect();
+                return;
+            }
+
             if (usePerMonitorMode)
             {
                 brightnessContrastNeedsUpdate = true;
@@ -663,28 +692,79 @@ namespace NegativeScreen
 
         public void Toggle()
         {
-            if (mainLoopPaused)
+            if (colorEffectActive)
             {
-                // 激活时默认使用最后一个显示器（扩展显示器）
-                MonitorManager.Refresh();
-                var monitors = MonitorManager.Monitors;
-                if (monitors.Count > 1)
+                // Turning OFF color inversion
+                colorEffectActive = false;
+                savedColorMatrix = currentMatrix;
+
+                if (HasNonDefaultBrightnessContrast())
                 {
-                    usePerMonitorMode = true;
-                    var lastMonitor = monitors[monitors.Count - 1];
-                    if (!enabledMonitors.Contains(lastMonitor.UniqueId))
+                    // Keep the overlay running with Identity color matrix
+                    // so brightness/contrast remain effective
+                    currentMatrix = BuiltinMatrices.Identity;
+                    if (mainLoopPaused)
                     {
-                        enabledMonitors.Clear();
-                        enabledMonitors.Add(lastMonitor.UniqueId);
+                        // Was paused, need to start
+                        MonitorManager.Refresh();
+                        var monitors2 = MonitorManager.Monitors;
+                        if (monitors2.Count > 1)
+                        {
+                            usePerMonitorMode = true;
+                            var lastMon2 = monitors2[monitors2.Count - 1];
+                            if (!enabledMonitors.Contains(lastMon2.UniqueId))
+                            {
+                                enabledMonitors.Clear();
+                                enabledMonitors.Add(lastMon2.UniqueId);
+                            }
+                        }
+                        mainLoopPaused = false;
+                        StartEffect();
+                    }
+                    else
+                    {
+                        // Already running, just switch matrix to Identity
+                        StopColorEffectKeepOverlay();
                     }
                 }
-                this.mainLoopPaused = false;
-                StartEffect();
+                else
+                {
+                    // No brightness/contrast adjustment, fully stop
+                    mainLoopPaused = true;
+                    StopEffect();
+                }
             }
             else
             {
-                this.mainLoopPaused = true;
-                StopEffect();
+                // Turning ON color inversion
+                colorEffectActive = true;
+                currentMatrix = savedColorMatrix ?? Configuration.Current.InitialColorEffect.Matrix;
+                savedColorMatrix = null;
+
+                if (mainLoopPaused)
+                {
+                    // 激活时默认使用最后一个显示器（扩展显示器）
+                    MonitorManager.Refresh();
+                    var monitors = MonitorManager.Monitors;
+                    if (monitors.Count > 1)
+                    {
+                        usePerMonitorMode = true;
+                        var lastMonitor = monitors[monitors.Count - 1];
+                        if (!enabledMonitors.Contains(lastMonitor.UniqueId))
+                        {
+                            enabledMonitors.Clear();
+                            enabledMonitors.Add(lastMonitor.UniqueId);
+                        }
+                    }
+                    this.mainLoopPaused = false;
+                    StartEffect();
+                }
+                else
+                {
+                    // Overlay is already running (for brightness/contrast),
+                    // just apply the color effect matrix
+                    ApplyCurrentEffectToAllMonitors();
+                }
             }
 
             if (this.InvokeRequired)
@@ -748,6 +828,34 @@ namespace NegativeScreen
             catch (CannotChangeColorEffectException) { }
 
             NativeMethods.MagSetFullscreenTransform(1.0f, 0, 0);
+        }
+
+        /// <summary>
+        /// Stop the color inversion effect but keep the overlay running
+        /// so that brightness/contrast remain effective.
+        /// </summary>
+        private void StopColorEffectKeepOverlay()
+        {
+            try
+            {
+                if (usePerMonitorMode)
+                {
+                    // Switch all magnifier windows to Identity + brightness/contrast
+                    foreach (var window in magnifierWindows.Values)
+                    {
+                        window.SetColorEffect(BuiltinMatrices.Identity);
+                        window.SetBrightnessContrast(globalBrightness, globalContrast);
+                    }
+                }
+                else
+                {
+                    // Apply Identity with brightness/contrast
+                    float[,] bcMatrix = BuiltinMatrices.ApplyBrightnessContrast(
+                        BuiltinMatrices.Identity, globalBrightness, globalContrast);
+                    BuiltinMatrices.ChangeColorEffect(bcMatrix);
+                }
+            }
+            catch (CannotChangeColorEffectException) { }
         }
 
         public void Enable()

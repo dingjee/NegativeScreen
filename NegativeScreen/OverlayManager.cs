@@ -56,7 +56,7 @@ namespace NegativeScreen
         private float globalBrightness = 0.0f;
         private float globalContrast = 1.0f;
 
-        private const string TargetMonitorName = "Paperlike HD";
+        private const string TargetMonitorName = "Paperlike";
 
         private MonitorInfo FindPaperlikeMonitor()
         {

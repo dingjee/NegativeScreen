@@ -42,7 +42,7 @@ namespace NegativeScreen
         /// Whether the color inversion effect is currently active.
         /// When false, brightness/contrast may still be active via Identity matrix.
         /// </summary>
-        private bool colorEffectActive = true;
+        private bool colorEffectActive = false;
         /// <summary>
         /// Saved color matrix when color effect is toggled off, so it can be restored on toggle on.
         /// </summary>
@@ -55,6 +55,19 @@ namespace NegativeScreen
 
         private float globalBrightness = 0.0f;
         private float globalContrast = 1.0f;
+
+        private const string TargetMonitorName = "Paperlike HD";
+
+        private MonitorInfo FindPaperlikeMonitor()
+        {
+            return MonitorManager.Monitors.FirstOrDefault(
+                m => m.FriendlyName != null && m.FriendlyName.IndexOf(TargetMonitorName, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private bool IsPaperlikeConnected()
+        {
+            return FindPaperlikeMonitor() != null;
+        }
 
         #region Inter-thread color effect calls
 
@@ -114,13 +127,7 @@ namespace NegativeScreen
             toggleInversionToolStripMenuItem.ShortcutKeyDisplayString = Configuration.Current.ToggleKey.ToString();
             exitToolStripMenuItem.ShortcutKeyDisplayString = Configuration.Current.ExitKey.ToString();
 
-            if (!Configuration.Current.ActiveOnStartup)
-            {
-                mainLoopPaused = true;
-                colorEffectActive = false;
-            }
-
-            currentMatrix = Configuration.Current.InitialColorEffect.Matrix;
+            currentMatrix = BuiltinMatrices.Identity;
 
             // Load saved brightness/contrast from conf BEFORE building the UI
             // so that the slider positions reflect the saved values.
@@ -131,6 +138,32 @@ namespace NegativeScreen
 
             InitializeMonitorSettings();
             InitializeControlLoop();
+
+            // Auto-detect Paperlike HD and start overlay
+            AutoDetectAndStartPaperlike();
+        }
+
+        private void AutoDetectAndStartPaperlike()
+        {
+            MonitorManager.Refresh();
+            var paperlike = FindPaperlikeMonitor();
+            if (paperlike != null)
+            {
+                usePerMonitorMode = true;
+                enabledMonitors.Clear();
+                enabledMonitors.Add(paperlike.UniqueId);
+                colorEffectActive = false;
+                currentMatrix = BuiltinMatrices.Identity;
+                mainLoopPaused = false;
+                StartEffect();
+            }
+            else
+            {
+                mainLoopPaused = true;
+                colorEffectActive = false;
+            }
+            BuildMonitorMenu();
+            UpdateMonitorMenuChecks();
         }
 
         private void InitializeMonitorSettings()
@@ -372,69 +405,24 @@ namespace NegativeScreen
             }
             monitorMenuItemCount = 0;
 
-            MonitorManager.Refresh();
-            var monitors = MonitorManager.Monitors;
-
-            // Do NOT auto-select here. Toggle() handles default selection.
-
-            int insertAt = monitorMenuInsertIndex;
-            foreach (var monitor in monitors)
+            // Only show Paperlike HD when it's connected
+            var paperlike = FindPaperlikeMonitor();
+            if (paperlike != null)
             {
-                string id = monitor.UniqueId;
+                string id = paperlike.UniqueId;
                 bool isChecked = enabledMonitors.Contains(id);
-                var monitorItem = new ToolStripMenuItem(monitor.ToString())
+                var monitorItem = new ToolStripMenuItem(paperlike.ToString())
                 {
                     Tag = id,
-                    Checked = isChecked
+                    Checked = isChecked,
+                    Enabled = false // Always selected, no manual toggle
                 };
-                monitorItem.Click += MonitorMenuItem_Click;
-                trayIconContextMenuStrip.Items.Insert(insertAt, monitorItem);
-                insertAt++;
-                monitorMenuItemCount++;
+                trayIconContextMenuStrip.Items.Insert(monitorMenuInsertIndex, monitorItem);
+                monitorMenuItemCount = 1;
             }
         }
 
-        private void MonitorMenuItem_Click(object sender, EventArgs e)
-        {
-            var clickedItem = (ToolStripMenuItem)sender;
-            string clickedId = (string)clickedItem.Tag;
-
-            usePerMonitorMode = true;
-
-            if (enabledMonitors.Contains(clickedId))
-            {
-                // Clicking an active monitor deselects it (allow none)
-                enabledMonitors.Remove(clickedId);
-                if (enabledMonitors.Count == 0)
-                {
-                    mainLoopPaused = true;
-                    StopEffect();
-                }
-                else
-                {
-                    // Single select: shouldn't happen, but just in case
-                    SyncMagnifierWindowsWithEnabledMonitors();
-                }
-            }
-            else
-            {
-                // Single-select: clear others first
-                enabledMonitors.Clear();
-                enabledMonitors.Add(clickedId);
-
-                if (mainLoopPaused)
-                {
-                    mainLoopPaused = false;
-                    StartEffect();
-                }
-                else
-                {
-                    SyncMagnifierWindowsWithEnabledMonitors();
-                }
-            }
-
-            UpdateMonitorMenuChecks();
-        }
+        // Monitor menu item is display-only for Paperlike HD (no click handler needed)
 
         private void UpdateMonitorMenuChecks()
         {
@@ -673,8 +661,8 @@ namespace NegativeScreen
         private void HandleDisplayChange()
         {
             MonitorManager.Refresh();
-            BuildMonitorMenu();
 
+            // Update bounds for existing windows, remove disconnected ones
             foreach (var kvp in magnifierWindows.ToList())
             {
                 var monitor = MonitorManager.Monitors.FirstOrDefault(m => m.UniqueId == kvp.Key);
@@ -686,53 +674,42 @@ namespace NegativeScreen
                 {
                     kvp.Value.Dispose();
                     magnifierWindows.Remove(kvp.Key);
+                    enabledMonitors.Remove(kvp.Key);
                 }
             }
+
+            var paperlike = FindPaperlikeMonitor();
+            if (paperlike != null && !enabledMonitors.Contains(paperlike.UniqueId))
+            {
+                // Paperlike HD just connected — auto-start overlay
+                AutoDetectAndStartPaperlike();
+            }
+            else if (paperlike == null && enabledMonitors.Count > 0)
+            {
+                // Paperlike HD disconnected — destroy overlay
+                mainLoopPaused = true;
+                colorEffectActive = false;
+                StopEffect();
+                enabledMonitors.Clear();
+            }
+
+            BuildMonitorMenu();
+            UpdateMonitorMenuChecks();
         }
 
         public void Toggle()
         {
+            // Do nothing if Paperlike HD is not connected / overlay not running
+            if (mainLoopPaused || enabledMonitors.Count == 0)
+                return;
+
             if (colorEffectActive)
             {
-                // Turning OFF color inversion
+                // Turning OFF color inversion — keep overlay for brightness/contrast
                 colorEffectActive = false;
                 savedColorMatrix = currentMatrix;
-
-                if (HasNonDefaultBrightnessContrast())
-                {
-                    // Keep the overlay running with Identity color matrix
-                    // so brightness/contrast remain effective
-                    currentMatrix = BuiltinMatrices.Identity;
-                    if (mainLoopPaused)
-                    {
-                        // Was paused, need to start
-                        MonitorManager.Refresh();
-                        var monitors2 = MonitorManager.Monitors;
-                        if (monitors2.Count > 1)
-                        {
-                            usePerMonitorMode = true;
-                            var lastMon2 = monitors2[monitors2.Count - 1];
-                            if (!enabledMonitors.Contains(lastMon2.UniqueId))
-                            {
-                                enabledMonitors.Clear();
-                                enabledMonitors.Add(lastMon2.UniqueId);
-                            }
-                        }
-                        mainLoopPaused = false;
-                        StartEffect();
-                    }
-                    else
-                    {
-                        // Already running, just switch matrix to Identity
-                        StopColorEffectKeepOverlay();
-                    }
-                }
-                else
-                {
-                    // No brightness/contrast adjustment, fully stop
-                    mainLoopPaused = true;
-                    StopEffect();
-                }
+                currentMatrix = BuiltinMatrices.Identity;
+                ApplyCurrentEffectToAllMonitors();
             }
             else
             {
@@ -740,40 +717,7 @@ namespace NegativeScreen
                 colorEffectActive = true;
                 currentMatrix = savedColorMatrix ?? Configuration.Current.InitialColorEffect.Matrix;
                 savedColorMatrix = null;
-
-                if (mainLoopPaused)
-                {
-                    // 激活时默认使用最后一个显示器（扩展显示器）
-                    MonitorManager.Refresh();
-                    var monitors = MonitorManager.Monitors;
-                    if (monitors.Count > 1)
-                    {
-                        usePerMonitorMode = true;
-                        var lastMonitor = monitors[monitors.Count - 1];
-                        if (!enabledMonitors.Contains(lastMonitor.UniqueId))
-                        {
-                            enabledMonitors.Clear();
-                            enabledMonitors.Add(lastMonitor.UniqueId);
-                        }
-                    }
-                    this.mainLoopPaused = false;
-                    StartEffect();
-                }
-                else
-                {
-                    // Overlay is already running (for brightness/contrast),
-                    // just apply the color effect matrix
-                    ApplyCurrentEffectToAllMonitors();
-                }
-            }
-
-            if (this.InvokeRequired)
-            {
-                this.Invoke(new Action(UpdateMonitorMenuChecks));
-            }
-            else
-            {
-                UpdateMonitorMenuChecks();
+                ApplyCurrentEffectToAllMonitors();
             }
         }
 
